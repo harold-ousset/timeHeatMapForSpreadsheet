@@ -15,7 +15,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-
 var HeatMap = function (){
   this.locales = {
     en: {
@@ -53,6 +52,28 @@ var HeatMap = function (){
 * ca me route a finir un jour...
 **/
 HeatMap.prototype.getData = function(eref, erow, ecol, enumRow, enumCol){
+  // https://stackoverflow.com/questions/9905533/convert-excel-column-alphabet-e-g-aa-to-number-e-g-25
+  var lettersToNumber = function(val) {
+    var base = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', i, j, result = 0;
+    
+    for (i = 0, j = val.length - 1; i < val.length; i += 1, j -= 1) {
+      result += Math.pow(base.length, j) * (base.indexOf(val[i]) + 1);
+    }
+    
+    return result;
+  };
+  
+  // https://stackoverflow.com/questions/45787459/convert-number-to-alphabet-string-javascript
+  var numToSSColumn = function (num){
+    var s = '', t;
+    
+    while (num > 0) {
+      t = (num - 1) % 26;
+      s = String.fromCharCode(65 + t) + s;
+      num = (num - t)/26 | 0;
+    }
+    return s || undefined;
+  }
   
   var r1c1Exp = /^(?:['"]{0,1}(.+?)[['"]{0,1}!){0,1}R(\d+)C(\d+):R(\d+)C(\d+)$/;  // recognise the sheet ref as R1C1
   var a1Exp = /^(?:['"]{0,1}(.+?)[['"]{0,1}!){0,1}([a-zA-Z]+)(\d*):([a-zA-Z])+(\d*)$/; // recongnise the sheet ref as A1
@@ -96,7 +117,6 @@ HeatMap.prototype.getData = function(eref, erow, ecol, enumRow, enumCol){
     }
   }
   
-  
   if(erow == undefined){ // 1 arg
     range = SpreadsheetApp.getActive().getRange(eref); // SheetName!A1:B2
   }
@@ -139,10 +159,23 @@ HeatMap.prototype.getData = function(eref, erow, ecol, enumRow, enumCol){
 * @return{Object} this, for parsing purpose
 **/
 HeatMap.prototype.consolidate = function(period, aggregateMethod) {
+  this.timelapse = [];
+  this.timelapseBounds = {} 
+  
+  // https://gist.github.com/caseyjustus/1166258
+  function median_(values) {
+    values.sort( function(a,b) {return a - b;} );
+    var half = Math.floor(values.length/2);
+    if(values.length % 2){
+      return values[half];
+    }
+    return (values[half-1] + values[half]) / 2.0;
+  }
+
   this.isSet.timelapse = true;
   period = period || {};
   if(period.startDate == undefined){
-  this.timelapseBounds.minDate = new Date(this.minMax.minDate.getFullYear()+'-01-01T00:00:00');
+    this.timelapseBounds.minDate = new Date(this.minMax.minDate.getFullYear()+'-01-01T00:00:00');
   } 
   else{
     this.timelapseBounds.minDate = period.startDate;
@@ -190,7 +223,6 @@ HeatMap.prototype.consolidate = function(period, aggregateMethod) {
       
     }
     pd.setDate(pd.getDate()+1);
-    
   }
   while(pd < this.timelapseBounds.maxDate);
   return this;
@@ -204,13 +236,46 @@ HeatMap.prototype.consolidate = function(period, aggregateMethod) {
 * @return{Object} this, for parsing purpose
 **/
 HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
+  
+  /**
+  * addBorderTo create a super object containing all the border 
+  * it need to be improved (copy the borders on adjacent cells
+  **/
+  function addBorderTo_(row, column, side){
+    this[row] = this[row] || {};
+    this[row][column] = this[row][column] || {top:false, right:false, bottom:false, left:false};
+    this[row][column][side] = true;
+  }
+  
+  /** transform a value within a range in code hexa color
+  * @param{Number} value to transform
+  * @param{Number} minimal value of the interval
+  * @param{Number} maximal value of the interval
+  * @return{String} Hexadecimal color code
+  **/
+  function getGradientColor_(rawVal, min, max){
+    var val = parseInt((rawVal - min) / (max - min) * 100);
+    var out = '';
+    if(val < 50){
+      out = "#"+('0' + (val*5).toString(16)).slice(-2)+"FF00";
+    }
+    else if (val > 50){
+      out =  "#FF" + ('0' + ((100 - val)*5).toString(16)).slice(-2) + "00";
+    }
+    else {
+      out = "#FFFF00";
+    }
+    return out;
+  }
+  
+  this.constructionMaterial = {weekDayMatrix:[], weekSumMatrix:[], borderedRanges:[], labelledCells:[] , colorMatrix:[], monthLabelMatrix:[]};
   this.isSet.constructionMaterial = true;
   dateArray = dateArray || this.timelapse;
   // check the integrity of the data
- // if(dateArray.length != Math.floor((dateArray[dateArray.length][0] - dateArray[0][0])/360000)){
- //   Logger.log('WARNING INCONSISTENT DATA');
- //   Logger.log(Math.floor((dateArray[dateArray.length][0] - dateArray[0][0])/360000)+' VS '+dateArray.length);
- // }
+  // if(dateArray.length != Math.floor((dateArray[dateArray.length][0] - dateArray[0][0])/360000)){
+  //   Logger.log('WARNING INCONSISTENT DATA');
+  //   Logger.log(Math.floor((dateArray[dateArray.length][0] - dateArray[0][0])/360000)+' VS '+dateArray.length);
+  // }
   var weekDayMatrix = [[],[],[],[],[],[],[]]; // help build the the top char per day of the week
   var weekSumMatrix = []; // help build the graph for each week
   var borderedRanges = {}; // tell where to create the border (row:{column:{top, right, bottom, left}})
@@ -229,18 +294,22 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
   plus7.setDate(start[0].getDate()+7);
   var wd = start[0].getDay(); // day of the week M, T, W, ....
   
+  if(wd-wdCorrection == -1){
+    wd = 7
+  }
   while(weekColorMatrix.length < wd-wdCorrection){ // init the array with blank
     weekColorMatrix.push(''); // add blank cell at start
     addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length - 1, 'bottom'); // add the header cap for WEEK 2 (row | column)
   }
-  addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length -1, 'right'); // first day of the month border
+  
+  addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length, 'left'); // first day of the month border
   
   do{
-   // parse each day in the array and do the job with it!
+    // parse each day in the array and do the job with it!
     var dayVals = dateArray.shift();
     plus7 = new Date(dayVals[0]); // week +1 from start
     plus7.setDate(dayVals[0].getDate()+7);
-  
+    
     wd = dayVals[0].getDay();
     if(dayVals[2] != null){ // if there is data handle them
       weekDayMatrix[wd].push(dayVals[2]);
@@ -253,10 +322,10 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
     
     // capping
     if(colorMatrix.length == 0){
-     addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length -1, 'top'); // cap the head for WEEK 1
+      addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length -1, 'top'); // cap the head for WEEK 1
     }
     else if(dayVals[0].getMonth() !== plus7.getMonth()){ // cap the bottom if next week is on an other month
-      addBorderTo_.call(borderedRanges, colorMatrix.length, weekColorMatrix.length -1, 'bottom'); 
+      addBorderTo_.call(borderedRanges, colorMatrix.length, weekColorMatrix.length - 1, 'bottom'); 
       var plus1 = new Date(dayVals[0]);
       plus1.setDate(plus1.getDate()+1);
       if(dayVals[0].getMonth() !== plus1.getMonth()){ // cap the last day of the month
@@ -266,7 +335,7 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
     
     // label the month
     if(dayVals[0].getDate() == 8){
-    monthLabelMatrix.push([this.locales[this.locale].months[dayVals[0].getMonth()], colorMatrix.length + 1, 0]); // txt, row, column (index 0)
+      monthLabelMatrix.push([this.locales[this.locale].months[dayVals[0].getMonth()], colorMatrix.length + 1, 0]); // txt, row, column (index 0)
     }
     
     // it's a new week store the color, weeksum data
@@ -281,7 +350,7 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
     }
   }
   while(dateArray.length > 0);
-    
+  
   // properly finish the array
   while(weekColorMatrix.length > 0 ){ // add the final blanks if color Matrix is not full
     weekColorMatrix.push(''); // add blank cell at start
@@ -302,12 +371,6 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
 }
 
 
-function addBorderTo_(row, column, side){
-  this[row] = this[row] || {};
-  this[row][column] = this[row][column] || {top:false, right:false, bottom:false, left:false};
-  this[row][column][side] = true;
-}
-
 /**
 * render tha map in a spreadsheet
 * @param{[String]} eref, the full reference where to render the map (SheetName!A1) OR the SheetName OR the starting Column
@@ -315,13 +378,62 @@ function addBorderTo_(row, column, side){
 * #param{[String]} ecol, the Column where to render the map
 **/
 HeatMap.prototype.render = function (eref, erow, ecol){
+  /** 
+  * set the border of a cell 
+  * @param{Object} sheet, the sheet where to apply the data
+  * @param{String} row, cell row
+  * @param{String} column, cell column
+  * @param{Object} borderObj, where to paint a border {top, left, bottom, right}
+  **/
+  function setBorders_(sheet, row, column, borderObj){
+    sheet.getRange(row, column).setBorder(
+      borderObj.top, 
+      borderObj.left, 
+      borderObj.bottom, 
+      borderObj.right, 
+      null, 
+      null, 
+      "black", 
+      SpreadsheetApp.BorderStyle.SOLID
+    );
+  }
+   
+  /**
+  * create the formula that display the sparkline graph for each row
+  * @param{Number} max for the week
+  * @return{String} the sparkline formula
+  **/
+  function setWeekSumSparks_(val){
+    if(val){
+      return ['=SPARKLINE('+val+', {"charttype","bar";"max",'+this.timelapseBounds.heavisetWeekVolume+';"color1","#2E9AFE"})'];
+    }
+    return [''];
+  } 
+  
+  /**
+  * create the formula that display the sparkline graph for each row
+  * @this{Object} vals, {minMax: {minVal, maxVal, minDate, maxDate}, errors:[]}
+  * @param{Array} raw values
+  * @return{String} the sparkline formula
+  **/
+  function setDaySparks_(arr){
+    if(arr !== null && arr.length > 0) {
+      var sum = arr.reduce(function(a, b) {
+        return a + b;
+      }, 0);
+      var avg = (sum/arr.length)-this.timelapseBounds.minVal;
+      return '=SPARKLINE('+avg+', {"charttype","column";"ymin",0;"ymax",'+(this.timelapseBounds.maxVal-this.timelapseBounds.minVal)+';"firstcolor","#2E9AFE"})';
+    }
+    return '';
+  }
+
   if(!this.isSet.timelapse){
     this.consolidate();
   }
   if(!this.isSet.constructionMaterial){
     this.buildRenderingDataForBlock();
   }
-  
+  this.isSet = {timelapse: false, constructionMaterial: false};
   var that = this;
   var sheet = SpreadsheetApp.getActiveSheet();
   var column = ecol || 1;
@@ -375,7 +487,7 @@ HeatMap.prototype.render = function (eref, erow, ecol){
       setBorders_(sheet, Number(brow)+4+row, Number(bcol)+2+column, this.constructionMaterial.borderedRanges[brow][bcol]);   
     }
   }
-      
+  
   // set columns width of map
   for(var i = 0 ;i<7; i++) {
     sheet.setColumnWidth(i+2+column, this.width);
@@ -390,111 +502,4 @@ HeatMap.prototype.render = function (eref, erow, ecol){
   sheet.setColumnWidth(column+1, this.width*0.6); // separation month label | map
   sheet.setColumnWidth(column+9, this.width*0.6); // separation map | spark week
   sheet.setColumnWidth(column+10, this.width*2.2); // set width Spark week
-}
-
-/** 
-* set the border of a cell 
-* @param{Object} sheet, the sheet where to apply the data
-* @param{String} row, cell row
-* @param{String} column, cell column
-* @param{Object} borderObj, where to paint a border {top, left, bottom, right}
-**/
-function setBorders_(sheet, row, column, borderObj){
-  sheet.getRange(row, column).setBorder(
-    borderObj.top, 
-    borderObj.left, 
-    borderObj.bottom, 
-    borderObj.right, 
-    null, 
-    null, 
-    "black", 
-    SpreadsheetApp.BorderStyle.SOLID
-  );
-}
-
-
-/**
-* create the formula that display the sparkline graph for each row
-* @param{Number} max for the week
-* @return{String} the sparkline formula
-**/
-function setWeekSumSparks_(val){
-  if(val){
-    return ['=SPARKLINE('+val+', {"charttype","bar";"max",'+this.timelapseBounds.heavisetWeekVolume+';"color1","#2E9AFE"})'];
-  }
-  return [''];
-}
-
-
-/**
-* create the formula that display the sparkline graph for each row
-* @this{Object} vals, {minMax: {minVal, maxVal, minDate, maxDate}, errors:[]}
-* @param{Array} raw values
-* @return{String} the sparkline formula
-**/
-function setDaySparks_(arr){
-  if(arr !== null && arr.length > 0) {
-    var sum = arr.reduce(function(a, b) {
-      return a + b;
-    }, 0);
-    var avg = (sum/arr.length)-this.timelapseBounds.minVal;
-    return '=SPARKLINE('+avg+', {"charttype","column";"ymin",0;"ymax",'+(this.timelapseBounds.maxVal-this.timelapseBounds.minVal)+';"firstcolor","#2E9AFE"})';
-  }
-  return '';
-}
-
-
-/** transform a value within a range in code hexa color
-* @param{Number} value to transform
-* @param{Number} minimal value of the interval
-* @param{Number} maximal value of the interval
-* @return{String} Hexadecimal color code
-**/
-function getGradientColor_(rawVal, min, max){
-  var val = parseInt((rawVal - min) / (max - min) * 100);
-  var out = '';
-  if(val < 50){
-    out = "#"+('0' + (val*5).toString(16)).slice(-2)+"FF00";
-  }
-  else if (val > 50){
-    out =  "#FF" + ('0' + ((100 - val)*5).toString(16)).slice(-2) + "00";
-  }
-  else {
-    out = "#FFFF00";
-  }
-  return out;
-}
-
-
-// https://stackoverflow.com/questions/9905533/convert-excel-column-alphabet-e-g-aa-to-number-e-g-25
-var lettersToNumber = function(val) {
-  var base = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', i, j, result = 0;
-  
-  for (i = 0, j = val.length - 1; i < val.length; i += 1, j -= 1) {
-    result += Math.pow(base.length, j) * (base.indexOf(val[i]) + 1);
-  }
-  
-  return result;
-};
-
-// https://stackoverflow.com/questions/45787459/convert-number-to-alphabet-string-javascript
-var numToSSColumn = function (num){
-  var s = '', t;
-  
-  while (num > 0) {
-    t = (num - 1) % 26;
-    s = String.fromCharCode(65 + t) + s;
-    num = (num - t)/26 | 0;
-  }
-  return s || undefined;
-}
-
-// https://gist.github.com/caseyjustus/1166258
-function median_(values) {
-  values.sort( function(a,b) {return a - b;} );
-  var half = Math.floor(values.length/2);
-  if(values.length % 2){
-    return values[half];
-  }
-  return (values[half-1] + values[half]) / 2.0;
 }
