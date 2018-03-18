@@ -16,12 +16,12 @@ limitations under the License.
 
 var HeatMap = function (){
   this.locales = {
-    en: {
+    "en-us": {
       days:['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
       months:['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
       weekStart:0
     },
-    fr: {
+    "fr": {
       days:['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'],
       months:['Jan', 'Feb', 'Mar', 'Avr', 'Mai', 'Jui', 'Jul', 'Aou', 'Sep', 'Oct', 'Nov', 'Dec'],
       weekStart:1
