@@ -1,4 +1,3 @@
-
 /*
 Copyright 2018 Harold Ousset
 
@@ -28,6 +27,16 @@ var HeatMap = function (){
       weekStart:1
     }
   };
+  
+  this.gradients = {
+  // inspiration: https://uigradients.com/
+  "weedingDayBlues": ["#40E0D0", "#FF8C00", "#FF0080"],
+  "kingYna": ["#1a2a6c", "#b21f1f", "#fdbb2d"],
+  "visionOfGrandeur": ["#000046", "#1CB5E0"],
+  "timber": ["#fc00ff", "#00dbde"],
+  "default": ["#00FF00", "#FFFF00","#FF0000"],
+  };
+  this.gradient = "default";
   
   this.width = 16;
   this.height = 16;
@@ -146,7 +155,7 @@ HeatMap.prototype.getData = function(eref, erow, ecol, enumRow, enumCol){
   var rawData = range.getValues();
   var that = this;
   rawData.forEach(reduceData_, that);
-  return this; // for parsing;
+  return this; // for chaining;
 }
 
 
@@ -156,14 +165,14 @@ HeatMap.prototype.getData = function(eref, erow, ecol, enumRow, enumCol){
 * @param{[Object]} period - {startDate, endDate}, the period that will be used to cover the calculation
 * @param{[String]} aggregateMethod, how does the values on a same date are aggregated: [sum, average, median] default: sum
 * @create{Object} heatMapDescriptor, {monthIdx:[3,6,9,...], out:[week[{day, value, color, top, bottom, right, left},],], minMax:{minVal, maxVal, minDate, maxDate}}
-* @return{Object} this, for parsing purpose
+* @return{Object} this, for chaining purpose
 **/
 HeatMap.prototype.consolidate = function(period, aggregateMethod) {
   this.timelapse = [];
   this.timelapseBounds = {} 
   
   // https://gist.github.com/caseyjustus/1166258
-  function median_(values) {
+  function median_(values) { // return the median of the results
     values.sort( function(a,b) {return a - b;} );
     var half = Math.floor(values.length/2);
     if(values.length % 2){
@@ -172,29 +181,31 @@ HeatMap.prototype.consolidate = function(period, aggregateMethod) {
     return (values[half-1] + values[half]) / 2.0;
   }
 
-  this.isSet.timelapse = true;
   period = period || {};
-  if(period.startDate == undefined){
+  if(period.startDate == undefined){ // set as the start of the year
     this.timelapseBounds.minDate = new Date(this.minMax.minDate.getFullYear()+'-01-01T00:00:00');
   } 
   else{
     this.timelapseBounds.minDate = period.startDate;
   }
-  if(period.endDate == undefined){
+  if(period.endDate == undefined){ // set as the end of the year
     this.timelapseBounds.maxDate = new Date(this.timelapseBounds.minDate.getFullYear()+'-12-31T23:59:59');
   }
   else{
     this.timelapseBounds.maxDate = period.endDate;
   }
   
+  this.timelapseBounds.minVal = undefined;
+  this.timelapseBounds.maxVal = undefined;
+  
   aggregateMethod = aggregateMethod || 'sum';
   
   var dd;  // displayed date
   var pd = new Date(this.timelapseBounds.minDate); // parsed Date
-  do{
+  
+  do{ // parse every day during the timelapse
     dd = pd.getFullYear()+('0'+(pd.getMonth()+1)).slice(-2)+('0'+pd.getDate()).slice(-2);
     var raw = this.data[dd];
-    //Logger.log(raw);
     if(raw == undefined || raw.values.length == 0){
       this.timelapse.push([new Date(pd),dd,null,null]);
     }
@@ -213,11 +224,12 @@ HeatMap.prototype.consolidate = function(period, aggregateMethod) {
         default:
           value = raw.values.reduce(function(a, b) { return a + b; });
       }
+      
       this.timelapse.push([new Date(pd),dd,value,raw.label]);  
       if (this.timelapseBounds.minVal == undefined || this.timelapseBounds.minVal > value) {
         this.timelapseBounds.minVal = value;
       }
-      else if (this.timelapseBounds.maxVal == undefined || this.timelapseBounds.maxVal < value) {
+      if (this.timelapseBounds.maxVal == undefined || this.timelapseBounds.maxVal < value) {
         this.timelapseBounds.maxVal = value;
       }
       
@@ -225,15 +237,18 @@ HeatMap.prototype.consolidate = function(period, aggregateMethod) {
     pd.setDate(pd.getDate()+1);
   }
   while(pd < this.timelapseBounds.maxDate);
-  return this;
+
+  this.isSet.timelapse = true;
+  this.isSet.constructionMaterial = false;
+  return this; // return self for chaining
 }
 
 
 /**
 *  Build rendering data for a given block
 *  fill constructionMaterial object
-* @param{[Array]} dateArray, the date block that will be parsed
-* @return{Object} this, for parsing purpose
+* @param{[Array]} dateArray, the date block that will be parsed if not provided will use timelapse [day, displayDay, value, label]
+* @return{Object} this, for chaining purpose
 **/
 HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
   
@@ -247,35 +262,17 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
     this[row][column][side] = true;
   }
   
-  /** transform a value within a range in code hexa color
-  * @param{Number} value to transform
-  * @param{Number} minimal value of the interval
-  * @param{Number} maximal value of the interval
-  * @return{String} Hexadecimal color code
-  **/
-  function getGradientColor_(rawVal, min, max){
-    var val = parseInt((rawVal - min) / (max - min) * 100);
-    var out = '';
-    if(val < 50){
-      out = "#"+('0' + (val*5).toString(16)).slice(-2)+"FF00";
-    }
-    else if (val > 50){
-      out =  "#FF" + ('0' + ((100 - val)*5).toString(16)).slice(-2) + "00";
-    }
-    else {
-      out = "#FFFF00";
-    }
-    return out;
-  }
-  
   this.constructionMaterial = {weekDayMatrix:[], weekSumMatrix:[], borderedRanges:[], labelledCells:[] , colorMatrix:[], monthLabelMatrix:[]};
   this.isSet.constructionMaterial = true;
+  
   dateArray = dateArray || this.timelapse;
+  
   // check the integrity of the data
-  // if(dateArray.length != Math.floor((dateArray[dateArray.length][0] - dateArray[0][0])/360000)){
-  //   Logger.log('WARNING INCONSISTENT DATA');
-  //   Logger.log(Math.floor((dateArray[dateArray.length][0] - dateArray[0][0])/360000)+' VS '+dateArray.length);
-  // }
+  if(dateArray.length != 1+Math.floor((dateArray[dateArray.length-1][0].getTime() - dateArray[0][0].getTime())/(3600*24*1000))){
+    Logger.log('WARNING INCONSISTENT DATA');
+    Logger.log(1+Math.floor((dateArray[dateArray.length-1][0].getTime() - dateArray[0][0].getTime())/(3600*24*1000))+' VS '+dateArray.length);
+  }
+  
   var weekDayMatrix = [[],[],[],[],[],[],[]]; // help build the the top char per day of the week
   var weekSumMatrix = []; // help build the graph for each week
   var borderedRanges = {}; // tell where to create the border (row:{column:{top, right, bottom, left}})
@@ -283,38 +280,40 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
   var colorMatrix = []; // how to color the shit
   var monthLabelMatrix = []; // label for the month (txt, row, column)
   
-  var weekColorMatrix = []; // 7 colors line TEMP data for each parsed week
+  var weekColorMatrix = []; // TEMP 7 colors line data for each parsed week
   var weekSum = null; // TEMP data to be used with weekSumMatrix
   var monthLabelWeekVal = ''; // can be '' or month to display
   var idx = 0;
   var wdCorrection = this.locales[this.locale].weekStart; // change the start of the day from sunday to monday (F..... murican)
   
   var start = dateArray[0]; // day where we start working
-  var plus7 = new Date(start[0]); // week +1 from start
+  var plus7 = new Date(start[0]); // week +1 from start (used for border to next month
   plus7.setDate(start[0].getDate()+7);
   var wd = start[0].getDay(); // day of the week M, T, W, ....
   
   if(wd-wdCorrection == -1){
-    wd = 7
+    wd = 7 // weed to find something better than that when I'm going to implement weekstart on saturday...
   }
-  while(weekColorMatrix.length < wd-wdCorrection){ // init the array with blank
+  while(weekColorMatrix.length < wd-wdCorrection){ // init the array with blank and border ==> what if start is different than 1 day of month?
     weekColorMatrix.push(''); // add blank cell at start
     addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length - 1, 'bottom'); // add the header cap for WEEK 2 (row | column)
   }
   
-  addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length, 'left'); // first day of the month border
+  addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length, 'left'); // first day of the month border ==> what if this is not the case?
   
-  do{
-    // parse each day in the array and do the job with it!
+  do{ // parse each day in the array and do the job with it! // while(dateArray.length > 0)
     var dayVals = dateArray.shift();
-    plus7 = new Date(dayVals[0]); // week +1 from start
-    plus7.setDate(dayVals[0].getDate()+7);
+    plus7 = new Date(dayVals[0]);
+    plus7.setDate(dayVals[0].getDate()+7); // week +1 from start
     
     wd = dayVals[0].getDay();
     if(dayVals[2] != null){ // if there is data handle them
       weekDayMatrix[wd].push(dayVals[2]);
       weekSum += dayVals[2];
-      weekColorMatrix.push(getGradientColor_(dayVals[2], this.timelapseBounds.minVal, this.timelapseBounds.maxVal)); // TODO include change palette color
+      weekColorMatrix.push(this.getGradientColor_(dayVals[2], this.timelapseBounds.minVal, this.timelapseBounds.maxVal, this.gradients[this.gradient])); // TODO include change palette color
+      if(dayVals[3] != null && dayVals[3] != undefined && dayVals[3] != ""){
+      labelledCells.push({label:dayVals[3], column:wd-wdCorrection, row: colorMatrix.length});
+      }
     }
     else{ // there is no data just add a GREY cell
       weekColorMatrix.push('#E6E6E6');
@@ -322,7 +321,7 @@ HeatMap.prototype.buildRenderingDataForBlock = function (dateArray){
     
     // capping
     if(colorMatrix.length == 0){
-      addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length -1, 'top'); // cap the head for WEEK 1
+      addBorderTo_.call(borderedRanges, 0, weekColorMatrix.length -1, 'top'); // cap the head for WEEK 1  ==> what if this is not the first week of month???
     }
     else if(dayVals[0].getMonth() !== plus7.getMonth()){ // cap the bottom if next week is on an other month
       addBorderTo_.call(borderedRanges, colorMatrix.length, weekColorMatrix.length - 1, 'bottom'); 
@@ -404,7 +403,7 @@ HeatMap.prototype.render = function (eref, erow, ecol){
   * @return{String} the sparkline formula
   **/
   function setWeekSumSparks_(val){
-    if(val){
+    if(val && this.timelapseBounds.heavisetWeekVolume != null){
       return ['=SPARKLINE('+val+', {"charttype","bar";"max",'+this.timelapseBounds.heavisetWeekVolume+';"color1","#2E9AFE"})'];
     }
     return [''];
@@ -417,7 +416,7 @@ HeatMap.prototype.render = function (eref, erow, ecol){
   * @return{String} the sparkline formula
   **/
   function setDaySparks_(arr){
-    if(arr !== null && arr.length > 0) {
+    if(arr !== null && arr.length > 1) { // >1  because if there is only one value this is not enough to build a graph
       var sum = arr.reduce(function(a, b) {
         return a + b;
       }, 0);
@@ -434,6 +433,7 @@ HeatMap.prototype.render = function (eref, erow, ecol){
     this.buildRenderingDataForBlock();
   }
   this.isSet = {timelapse: false, constructionMaterial: false};
+  
   var that = this;
   var sheet = SpreadsheetApp.getActiveSheet();
   var column = ecol || 1;
@@ -453,22 +453,30 @@ HeatMap.prototype.render = function (eref, erow, ecol){
     sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(eref);
   }
   
-  sheet.getRange(row, column, this.constructionMaterial.colorMatrix.length+4, 11).clear();
   
-  // week sparks at 4 | 10
+  // clean area before doing anything
+  sheet.getRange(row, column, this.constructionMaterial.colorMatrix.length+7, 11).clear().clearNote();
+  
+  // set comment labels, start at position 4 | 2
+  var labels = this.constructionMaterial.labelledCells;
+  labels.forEach(function (lblObj){
+    sheet.getRange(lblObj.row+ row+ 4, lblObj.column + 2 + column).setNote(lblObj.label);
+  }); 
+  
+  // set weeks sparks, start at position 4 | 10
   var sparks = this.constructionMaterial.weekSumMatrix.map(setWeekSumSparks_, that);
   sheet.getRange(row+4, column+10, sparks.length, 1).setFormulas(sparks);
   
-  // color start at 4 | 2
+  // set colors, start at position 4 | 2
   sheet.getRange(row+4, column+2, this.constructionMaterial.colorMatrix.length, 7).setBackgrounds(this.constructionMaterial.colorMatrix);;
   
-  // month label at 4 | 0
+  // set months labels, start at position 4 | 0
   this.constructionMaterial.monthLabelMatrix.forEach(setMonthLabel_, sheet);
   function setMonthLabel_(cellRef){
     this.getRange(cellRef[1]+row + 4, cellRef[2]+column).setValue(cellRef[0]);
   }
   
-  // week label 2 | 2
+  // set upper days label, start at position 2 | 2
   var weekDays = this.locales[this.locale].days.map(
     function(day){
       return day.slice(0,1);
@@ -476,12 +484,24 @@ HeatMap.prototype.render = function (eref, erow, ecol){
   );
   sheet.getRange(row+2, column+2, 1, 7).setValues([weekDays]);
   
-  // day sparks at 0 | 2
+  // set color gradient legend, start at position x+6 | 2
+  var grad = this.gradients[this.gradient];
+  var colors = [];
+  colors.push(this.getGradientColor_(0, 0, 1, grad));
+  for(var i = 1; i < 6; i++){
+    var valmin = i/7;
+    colors.push(this.getGradientColor_(valmin, 0, 1, grad));
+  }
+  colors.push(this.getGradientColor_(1, 0, 1, grad));
+  sheet.getRange(this.constructionMaterial.colorMatrix.length + row + 6, column+2, 1,7).setBackgrounds([colors]);
+  
+  // set sparks by day type, start at position 0 | 2
   var daySparks = this.constructionMaterial.weekDayMatrix.map(setDaySparks_, that);
   var lastDays = daySparks.splice(0,this.locales[this.locale].weekStart);
   daySparks = daySparks.concat(lastDays);
   sheet.getRange(row, column+2, 1, 7).setFormulas([daySparks]);
   
+  // set borders
   for(var brow in this.constructionMaterial.borderedRanges){
     for(var bcol in this.constructionMaterial.borderedRanges[brow]){
       setBorders_(sheet, Number(brow)+4+row, Number(bcol)+2+column, this.constructionMaterial.borderedRanges[brow][bcol]);   
@@ -498,8 +518,48 @@ HeatMap.prototype.render = function (eref, erow, ecol){
     sheet.setRowHeight(j+4, this.height);
   }
   
+  // set row height for gradient
+  sheet.setRowHeight(this.constructionMaterial.colorMatrix.length + row + 6, this.height*0.4);
+  
   sheet.setColumnWidth(column, this.width*2.2); // set width of month label column
   sheet.setColumnWidth(column+1, this.width*0.6); // separation month label | map
   sheet.setColumnWidth(column+9, this.width*0.6); // separation map | spark week
   sheet.setColumnWidth(column+10, this.width*2.2); // set width Spark week
+}
+
+/**
+* get gradient color, a sub function to generate a color code from an interval
+* @param{Number} rawVal, the value to transform in color code
+* @param{Number} min, minimal value from the interval
+* @param{Number} max, the maximal value from the interval
+* @param{Array} gradient, the colors codes used in the gradient
+* @return{String} colorCode, the color code in hex code
+**/
+HeatMap.prototype.getGradientColor_ =   function (rawVal, min, max, gradient){
+  var val = (rawVal - min) / (max - min);
+  if(val == 0 || val == undefined || isNaN(val)){
+    return gradient[0];
+  }
+  var interval = gradient.length - 1;
+  var spaces = 1/interval;
+  var chevron = 0;
+  while(chevron*spaces < val && chevron*spaces<=1){
+    chevron++;
+  }
+  val = (val - (chevron-1)*spaces)/ spaces;
+  var myMax = gradient[chevron];
+  var myMin = gradient[chevron-1];
+  
+  var r1,g1,b1, r2, g2, b2;
+  r1 = myMin.substr(1,2);
+  g1 = myMin.substr(3,2);
+  b1 = myMin.substr(5,2);
+  r2 = myMax.substr(1,2);
+  g2 = myMax.substr(3,2);
+  b2 = myMax.substr(5,2);
+  var out = '#'
+  +('0'+Math.round(parseInt(r1,16)+((parseInt(r2,16)-parseInt(r1,16))*val)).toString(16)).slice(-2)
+  +('0'+Math.round(parseInt(g1,16)+((parseInt(g2,16)-parseInt(g1,16))*val)).toString(16)).slice(-2)
+  +('0'+Math.round(parseInt(b1,16)+((parseInt(b2,16)-parseInt(b1,16))*val)).toString(16)).slice(-2);
+  return out;
 }
