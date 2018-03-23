@@ -145,7 +145,8 @@ function displayMap() {
 *** 
   
 ### Next planned evolutions:  
-- reduce font display, reduce gap between text and graph
+- Behaviour: always start at the begining of the month even if the given start date is not the first day of the month, or allow random starts?
+- add methods to change rendering optins
 - change the display: disable display of month, weekday , sparkline graphs  
 - remove weekends  
 - allow differents date imput format (sync with the locale option)  
