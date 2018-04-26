@@ -145,10 +145,12 @@ function displayMap() {
 *** 
   
 ### Next planned evolutions:  
-- Behaviour: always start at the begining of the month even if the given start date is not the first day of the month, or allow random starts?
-- add methods to change rendering optins
-- change the display: disable display of month, weekday , sparkline graphs  
-- remove weekends  
-- allow differents date imput format (sync with the locale option)  
-- prevent data crush on the rendering zone  
-- allow splits (eg: 4 month by 4) and keep the minMax global to the whole period  
+- Behaviour: always start at the begining of the month even if the given start date is not the first day of the month, or allow random starts?  
+- Add methods to change rendering options (change the way to address the arguments when creating a heat map)  
+- Option to change the display: disable display of month, weekday , sparkline graphs  (done, need to create doc about that)  
+- Option to remove weekends  
+- Allow differents date imput format (sync with the locale option)  
+- Prevent data crush on the rendering zone (if there is some data will throw error instead of rendering the map)  
+- Option to allow splits (eg: 4 month by 4) and keep the minMax global to the whole period (done, need to create doc about that)  
+- Option to display the actual value in the cell (same color as the background)  
+- Change rendering scale elasticity (allow to render low/high values with few color amplitude)   
