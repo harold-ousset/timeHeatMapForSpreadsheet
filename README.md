@@ -154,3 +154,4 @@ function displayMap() {
 - Option to allow splits (eg: 4 month by 4) and keep the minMax global to the whole period (done, need to create doc about that)  
 - Option to display the actual value in the cell (same color as the background)  
 - Change rendering scale elasticity (allow to render low/high values with few color amplitude)   
+- Remove cells comments in the drawing zone before drawing anything  
